@@ -1,4 +1,5 @@
-"""Yahoo Mail over IMAP. Read-only by design.
+"""Email over IMAP (Gmail, Yahoo, iCloud or any server with an app password). Read-only
+by design.
 
 - The inbox is only ever opened with EXAMINE (read-only), and every fetch uses BODY.PEEK,
   so nothing changes on the server: mail stays unread, nothing is moved or deleted.
@@ -19,7 +20,6 @@ from imap_tools.errors import MailboxLoginError
 from ultron.config import Settings
 from ultron.errors import UserFacingError
 
-YAHOO_IMAP_HOST = "imap.mail.yahoo.com"
 TIMEOUT_SECONDS = 20
 FOLDER = "INBOX"
 BACKFILL_DAYS = 30  # how far back the very first read goes
@@ -66,21 +66,31 @@ class MailBatch:
 
 @contextmanager
 def _login(settings: Settings) -> Iterator[MailBox]:
-    assert settings.yahoo_user and settings.yahoo_app_password
+    assert settings.email_address and settings.email_app_password
+    provider = settings.mail_provider
+    if not provider.supported:
+        raise MailError(f"{provider.app_password}. Remove EMAIL_ADDRESS to switch email off.")
+    if not settings.imap_host:
+        raise MailError(
+            f"Set EMAIL_IMAP_HOST to your email's IMAP server. {provider.app_password}."
+        )
     try:
-        with MailBox(YAHOO_IMAP_HOST, timeout=TIMEOUT_SECONDS).login(
-            settings.yahoo_user,
-            settings.yahoo_app_password.get_secret_value(),
+        with MailBox(settings.imap_host, timeout=TIMEOUT_SECONDS).login(
+            settings.email_address,
+            settings.email_app_password.get_secret_value(),
             initial_folder=None,  # don't SELECT anything
         ) as mailbox:
             yield mailbox
     except MailboxLoginError as exc:
         raise MailError(
-            "Yahoo rejected the login. Check YAHOO_USER and that YAHOO_APP_PASSWORD is an "
-            "app password (Yahoo Account Security → Generate app password), not your normal one."
+            f"{provider.name} rejected the login. Check EMAIL_ADDRESS, and that "
+            f"EMAIL_APP_PASSWORD is an app password, not your normal one: "
+            f"{provider.app_password}."
         ) from exc
     except OSError as exc:  # timeouts, DNS, dropped connections
-        raise MailError(f"Couldn't reach Yahoo Mail ({exc}). I'll try again next sync.") from exc
+        raise MailError(
+            f"Couldn't reach {provider.name} ({exc}). I'll try again next sync."
+        ) from exc
 
 
 def check_login(settings: Settings) -> str:

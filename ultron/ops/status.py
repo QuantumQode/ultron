@@ -41,7 +41,11 @@ def build_status(settings: Settings, state: State, guard: CostGuard) -> StatusRe
             Integration("Telegram", True, 1),
             Integration("Claude", True, 1),
             Integration("Notion", settings.notion_enabled, 2),
-            Integration("Yahoo Mail", settings.mail_enabled, 3),
+            Integration(
+                f"Email ({settings.mail_provider.name})" if settings.mail_configured else "Email",
+                settings.mail_enabled,
+                3,
+            ),
             Integration("iCloud Calendar", settings.calendar_enabled, 4),
         ],
         jobs=state.job_runs(),

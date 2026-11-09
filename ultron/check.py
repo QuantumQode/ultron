@@ -54,10 +54,10 @@ def checks_for(settings: Settings) -> list[Check]:
             "set NOTION_TOKEN and NOTION_ROOT_PAGE_ID",
         ),
         Check(
-            "Yahoo Mail",
+            "Email",
             mail.check_login,
-            settings.mail_enabled,
-            "set YAHOO_USER and YAHOO_APP_PASSWORD",
+            settings.mail_configured,  # an unsupported provider shows ❌ with what to do
+            "set EMAIL_ADDRESS and EMAIL_APP_PASSWORD (and EMAIL_PROVIDER if it isn't guessed)",
         ),
         Check(
             "iCloud Calendar",

@@ -1,7 +1,7 @@
 """Settings for Ultron, loaded from environment variables / `.env`.
 
 Telegram and Anthropic are required: without them Ultron can't do anything.
-Notion, Yahoo and iCloud are optional so the bot can run before every account
+Notion, email and iCloud are optional so the bot can run before every account
 is set up; features that need them stay off until their keys are present.
 """
 
@@ -11,8 +11,10 @@ from pathlib import Path
 from typing import Annotated
 from zoneinfo import ZoneInfo
 
-from pydantic import Field, SecretStr, field_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+
+from ultron.integrations.mail_providers import PROVIDERS, Provider, guess
 
 WEEKDAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 DEFAULT_ZONE = ZoneInfo("Europe/London")
@@ -54,8 +56,12 @@ class Settings(BaseSettings):
     notion_token: SecretStr | None = None
     notion_root_page_id: str | None = None
 
-    # --- Yahoo Mail, read-only (optional until phase 3) ---
-    yahoo_user: str | None = None
+    # --- Email over IMAP, read-only (optional) ---
+    email_provider: str | None = None  # gmail, yahoo, icloud, other; guessed from the address
+    email_address: str | None = None
+    email_app_password: SecretStr | None = None
+    email_imap_host: str | None = None  # only for "other"
+    yahoo_user: str | None = None  # older names, still read: provider yahoo
     yahoo_app_password: SecretStr | None = None
     email_blocklist: Annotated[list[str], NoDecode] = []  # senders/domains never fetched
 
@@ -90,6 +96,28 @@ class Settings(BaseSettings):
             return [item.strip().lower() for item in value.split(",") if item.strip()]
         return value
 
+    @field_validator("email_provider")
+    @classmethod
+    def _check_provider(cls, value: str | None) -> str | None:
+        if value is None or not value.strip():
+            return None
+        value = value.strip().lower()
+        if value not in PROVIDERS:
+            raise ValueError(f"must be one of {', '.join(PROVIDERS)}")
+        return value
+
+    @model_validator(mode="after")
+    def _email_defaults(self) -> "Settings":
+        """YAHOO_USER/YAHOO_APP_PASSWORD still work (as provider yahoo); with no
+        EMAIL_PROVIDER, the address says which provider it is."""
+        if not self.email_address and self.yahoo_user:
+            self.email_address = self.yahoo_user
+            self.email_app_password = self.email_app_password or self.yahoo_app_password
+            self.email_provider = self.email_provider or "yahoo"
+        if self.email_address and not self.email_provider:
+            self.email_provider = guess(self.email_address)
+        return self
+
     @field_validator("tz")
     @classmethod
     def _check_tz(cls, value: str) -> str:
@@ -121,8 +149,22 @@ class Settings(BaseSettings):
         return bool(self.notion_token and self.notion_root_page_id)
 
     @property
+    def mail_provider(self) -> Provider:
+        return PROVIDERS[self.email_provider or "other"]
+
+    @property
+    def imap_host(self) -> str | None:
+        return self.email_imap_host or self.mail_provider.host
+
+    @property
+    def mail_configured(self) -> bool:
+        """The owner has filled in their email (it may still not be usable)."""
+        return bool(self.email_address and self.email_app_password)
+
+    @property
     def mail_enabled(self) -> bool:
-        return bool(self.yahoo_user and self.yahoo_app_password)
+        """Email can be read: filled in, a supported provider, and a server to reach."""
+        return bool(self.mail_configured and self.mail_provider.supported and self.imap_host)
 
     @property
     def calendar_enabled(self) -> bool:

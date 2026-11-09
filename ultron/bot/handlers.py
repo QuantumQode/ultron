@@ -207,7 +207,7 @@ def _job_failed(state: State, job: str, exc: Exception) -> str:
 async def inbox_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     deps = _deps(context)
     if not deps.settings.mail_enabled:
-        await reply(update.effective_message, "Email isn't set up yet (YAHOO_USER in .env).")
+        await reply(update.effective_message, "Email isn't set up yet (EMAIL_ADDRESS in .env).")
         return
     zone = deps.settings.zone
     digest = inbox_digest(EmailStore(deps.state), datetime.now(zone))

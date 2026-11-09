@@ -51,7 +51,7 @@ def test_only_configured_services_enabled(settings):
         "Telegram": True,
         "Claude": True,
         "Notion": False,
-        "Yahoo Mail": False,
+        "Email": False,
         "iCloud Calendar": False,
     }
     full = make_settings(

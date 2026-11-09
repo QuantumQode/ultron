@@ -71,7 +71,7 @@ Open `.env` and fill in values as you collect them. Every setting is explained i
 | `ANTHROPIC_API_KEY` | [console.anthropic.com](https://console.anthropic.com) → API keys | Phase 1 |
 | `NOTION_TOKEN` | [notion.so/my-integrations](https://www.notion.so/my-integrations) → new internal integration | Phase 2 |
 | `NOTION_ROOT_PAGE_ID` | Create an empty "Ultron" page, then ••• → Connections → add your integration. Paste the page URL. | Phase 2 |
-| `YAHOO_USER`, `YAHOO_APP_PASSWORD` | Yahoo Account → Account Security → Generate app password | Phase 3 |
+| `EMAIL_ADDRESS`, `EMAIL_APP_PASSWORD` | Your address and an app password (not your normal one). **Gmail:** turn on 2-Step Verification, then [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords). **Yahoo:** Account Security → Generate app password. **iCloud:** [appleid.apple.com](https://appleid.apple.com) → App-Specific Passwords. Other providers: also set `EMAIL_IMAP_HOST`. Outlook/Hotmail isn't supported yet (Microsoft no longer allows app passwords for IMAP). | Phase 3 |
 | `ICLOUD_USER`, `ICLOUD_APP_PASSWORD` | *(Optional, not needed yet.)* [appleid.apple.com](https://appleid.apple.com) → Sign-In and Security → App-Specific Passwords. Only if Ultron should one day *read* your Apple Calendar. | Later |
 
 ### 3. Test your keys
@@ -167,7 +167,7 @@ Ultron keeps your data in services you already own, where you can see it. Its ow
 | Tasks, goals, habits, schedule, ideas, daily log and journal | Notion **🗂 Board** page | Ultron's organised view, in collapsible sections. Tick to-dos and edit freely; your changes win. *(Phase 2+)* |
 | **What Ultron knows about you** (preferences, facts, routines, focus mode) | The Board's **🧠 About me & focus** and **📌 My schedule** sections | No hidden memory: everything Ultron remembers about you is there, and you can edit or delete it. See below. |
 | Your plan (today, tomorrow, rest of the week) | Notion **📅 Schedule** page | Replaces Apple Calendar; Ultron never writes to Apple Calendar. Tick blocks there; ticks reach the Board too. |
-| Email | Stays in **Yahoo** | Read-only: nothing is sent, moved, deleted or marked as read. Ultron keeps one-line summaries in `ultron.db` for 90 days, never full emails, and never downloads blocklisted senders. From the Sent folder it reads only who you replied to. See below. |
+| Email | Stays with **your email provider** | Read-only: nothing is sent, moved, deleted or marked as read. Ultron keeps one-line summaries in `ultron.db` for 90 days, never full emails, and never downloads blocklisted senders. From the Sent folder it reads only who you replied to. See below. |
 | Internal state: the structure behind the Board (estimates, due dates, times moved, completion history), job health, API spend, sync bookmarks, recent chat, Reflect transcripts | `data/ultron.db` (SQLite) on the machine running Ultron | Gitignored. Backed up nightly at 03:30 to `backups/`, with 14 days kept. |
 | Code | This repo | Never secrets or personal data. |
 
@@ -228,7 +228,7 @@ Nothing changes without your tap. If Ultron was off at one of these times, Ultro
 
 ### How Ultron handles your email
 
-1. **Every hour** it reads up to 100 new emails from your Yahoo inbox. On the first run it goes back 30 days.
+1. **Every hour** it reads up to 100 new emails from your inbox (Gmail, Yahoo, iCloud or any IMAP server with an app password). On the first run it goes back 30 days.
 2. **Senders in `EMAIL_BLOCKLIST`** (e.g. `mybank.co.uk,doctor@clinic.com`) are spotted from the header alone and never downloaded or sent to Claude.
 3. **Claude (Haiku) sorts the rest:** important (money due, deadlines and appointments, real people), FYI, promotions (only counted) or automated noise, with a one-line summary.
 4. **Things to do** go into your Board's To-do list, tagged with 📧 and the sender. If you already have that to-do, or it's a reply in the same thread, the existing one is updated instead. To-dos from emails more than a week old ask "(?) Still needed?".
