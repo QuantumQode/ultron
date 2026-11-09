@@ -1,0 +1,22 @@
+# Run from the repo root: docker compose -f deploy/docker-compose.yml up -d --build
+# Paths below are relative to this file. Create data/ and backups/, and copy .env in, before the first start
+# (Docker would otherwise create them as root-owned folders).
+services:
+  ultron:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: ultron
+    container_name: ultron
+    restart: unless-stopped
+    volumes:
+      - ../data:/app/data # SQLite database; survives rebuilds
+      - ../backups:/app/backups # nightly backups, 14 days kept
+      - ../.env:/app/.env:ro # read by Ultron itself, exactly as on the PC
+    # No ports: Ultron only connects out (Telegram polling, APIs), and published ports bypass ufw.
+    logging:
+      driver: local
+      options:
+        max-size: 10m
+        max-file: "5"
+    stop_grace_period: 30s

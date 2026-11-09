@@ -1,0 +1,8 @@
+# Store and check out text files with Linux (LF) line endings everywhere,
+# so files behave the same on Windows, the VPS and in Docker.
+* text=auto eol=lf
+
+# Windows-only scripts keep CRLF
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+*.cmd text eol=crlf

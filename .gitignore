@@ -1,0 +1,20 @@
+# Secrets and local data
+.env
+data/
+.claude/settings.local.json
+*.db
+*.sqlite
+*.sqlite3
+backups/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+
+# The owner's private repo (TODO, design notes, preferences)
+private/

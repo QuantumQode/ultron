@@ -1,0 +1,39 @@
+[project]
+name = "ultron"
+version = "0.1.0"
+description = "Personal assistant that holds you accountable: email, Notion notes and daily planning over Telegram, on the Claude API."
+license = "MIT"
+requires-python = ">=3.13"
+dependencies = [
+    "python-telegram-bot[job-queue]>=22.8,<23",
+    "anthropic>=1.15,<2",
+    "pydantic-settings>=2.16,<3",
+    "notion-client>=3.1,<4",
+    "imap-tools>=1.16,<2",
+    "caldav>=3.5,<4",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=9.1,<10",
+    "pytest-asyncio>=1.4,<2",
+    "ruff>=0.17",
+]
+
+[build-system]
+requires = ["setuptools>=77"]  # PEP 639 licence field
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["ultron*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
