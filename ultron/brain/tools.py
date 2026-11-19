@@ -187,6 +187,20 @@ SET_TIME = _tool(
         "when": {"type": "string", "description": "'HH:MM-HH:MM', e.g. '07:00-08:30'"},
     },
 )
+ADD_APPOINTMENT = _tool(
+    "add_appointment",
+    "Add a ONE-OFF appointment on one date (a booking, a GP visit, the dentist on Monday) to the "
+    "owner's schedule, so the planner works around it. Needs its start and end: when="
+    "'HH:MM-HH:MM' with travel inside those times. If they haven't said both, ask them "
+    "first and pass when='' only if you must; it won't be added. Weekly entries need "
+    "suggest_change.",
+    {
+        "title": {"type": "string", "description": "In their words, e.g. 'Dentist'"},
+        "day": DATE,
+        "when": {"type": "string", "description": "'HH:MM-HH:MM', e.g. '07:00-08:30'"},
+        "area": {"type": "string", "enum": AREAS},
+    },
+)
 THINK_HARDER = _tool(
     "think_harder",
     "Hand this message to a more capable model. Use for advice, decisions, planning across "
@@ -220,6 +234,7 @@ TOOLS = [
     SUGGEST,
     REQUEST_PLAN,
     SET_TIME,
+    ADD_APPOINTMENT,
     READ_LOG,
 ]
 
@@ -393,6 +408,32 @@ def run_tool(
         item = store.update(item.id, **timing, travel_minutes=None, question=question)
         effects.items_changed = True
         return f"Updated: {line(item)}"
+
+    if name == "add_appointment":
+        day = date.fromisoformat(args["day"])  # ValueError if malformed
+        if day < datetime.now(DEFAULT_ZONE).date():
+            raise ValueError(f"{day:%a %d %b} is in the past. Check the date with the owner.")
+        timing = parse_when(args.get("when"))
+        if set(timing) != {"start_time", "end_time"}:
+            raise ValueError(
+                "Not added: it needs a start and an end. Ask the owner what time it starts "
+                "and ends, travel included, then call add_appointment again."
+            )
+        if timing["end_time"] <= timing["start_time"]:
+            raise ValueError("The end must be after the start, e.g. '07:00-08:30'.")
+        item = store.add(
+            kind="schedule",
+            title=args["title"].strip(),
+            details=None,
+            project=None,
+            area=args["area"],
+            due=day.isoformat(),
+            due_on=True,
+            question=None,
+            **timing,
+        )
+        effects.items_changed = True
+        return f"Added to the schedule: {line(item)}"
 
     if name == "remember":
         item = store.add(
