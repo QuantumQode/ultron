@@ -1,3 +1,5 @@
+from datetime import UTC, datetime, timedelta
+
 import pytest
 from fake_notion import FakeNotion
 
@@ -117,3 +119,49 @@ def test_trashed_blocks_are_ignored(fake, state, ws):
     gone = fake.add_text(ws.inbox_id, "paragraph", "deleted thought")
     fake.objects[gone]["archived"] = True
     assert read_inbox(fake, state, ws).jottings == []
+
+
+# --- notes being written, and lines that belong together ---
+
+NOW = datetime(2026, 10, 20, 12, 0, tzinfo=UTC)
+
+
+def edited(fake, block_id, minutes_ago):
+    when = NOW - timedelta(minutes=minutes_ago)
+    fake.objects[block_id]["last_edited_time"] = when.strftime("%Y-%m-%dT%H:%M:00.000Z")
+
+
+def test_lines_in_a_row_are_one_note_and_a_blank_line_starts_the_next(fake, state, ws):
+    fake.add_text(ws.inbox_id, "paragraph", "Urgent:")
+    fake.add_text(ws.inbox_id, "paragraph", "call the bank")
+    fake.add_text(ws.inbox_id, "paragraph", "")
+    fake.add_text(ws.inbox_id, "paragraph", "buy milk")
+    read = read_inbox(fake, state, ws, now=NOW)
+    notes = [j.note for j in read.jottings]
+    assert texts(read) == ["Urgent:", "call the bank", "buy milk"]
+    assert notes[0] == notes[1] != notes[2]
+
+
+def test_a_note_still_being_written_waits_whole_for_the_next_sync(fake, state, ws):
+    first = fake.add_text(ws.inbox_id, "paragraph", "Urgent:")
+    second = fake.add_text(ws.inbox_id, "paragraph", "call the")
+    fake.add_text(ws.inbox_id, "paragraph", "")
+    fake.add_text(ws.inbox_id, "paragraph", "buy milk")  # written long ago
+    edited(fake, first, 20)
+    edited(fake, second, 3)  # still being typed
+    read = read_inbox(fake, state, ws, now=NOW)
+    assert texts(read) == ["buy milk"] and read.held == 2
+
+    mark_synced(state, read)
+    assert state.get("inbox.last_seen_edit") is None  # read again next time
+
+    later = read_inbox(fake, state, ws, now=NOW + timedelta(minutes=15))
+    assert texts(later) == ["Urgent:", "call the"] and later.held == 0
+
+
+def test_a_note_is_taken_once_untouched_for_15_minutes(fake, state, ws):
+    line = fake.add_text(ws.inbox_id, "paragraph", "renew passport")
+    edited(fake, line, 15)
+    assert texts(read_inbox(fake, state, ws, now=NOW)) == ["renew passport"]
+    edited(fake, line, 14)
+    assert read_inbox(fake, state, ws, now=NOW).held == 1

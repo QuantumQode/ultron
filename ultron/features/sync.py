@@ -74,6 +74,7 @@ class SyncReport:
     missed: list[str] = field(default_factory=list)  # left in place this time
     parked: list[str] = field(default_factory=list)  # newly parked; owner is told
     move_failures: int = 0
+    held: int = 0  # Inbox lines still being written: left for the next sync
     cost_usd: float = 0.0
     skipped: bool = False  # nothing changed anywhere
     schedule_changed: bool = False
@@ -100,6 +101,8 @@ class SyncReport:
             parts.append(f"moved {self.moved} note(s) into ✓ Processed")
         if self.missed:
             parts.append(f"{len(self.missed)} line(s) couldn't be sorted and stay in place")
+        if self.held:
+            parts.append(f"{self.held} line(s) edited in the last 15 min wait for the next sync")
         if self.move_failures:
             parts.append(f"{self.move_failures} note(s) couldn't be moved and stay in place")
         text = "; ".join(parts) or "Everything already up to date"
@@ -275,7 +278,8 @@ async def _sync(settings, state, guard, notifier, make_llm, client, force, today
     close_past_appointments(store, now.date())  # yesterday's one-offs leave the Schedule
 
     # 2. New notes from the Inbox (cheap no-op when it's unchanged) plus lines typed on the Board.
-    inbox = await run(read_inbox, client, state, ws, force=force)
+    inbox = await run(read_inbox, client, state, ws, force=force, now=now)
+    report.held = inbox.held
     handled = state.inbox_handled()
     board_lines = [j for j in board_lines if j.block_id not in handled]  # sorted, move pending
     fresh = inbox.jottings + board_lines
@@ -360,8 +364,9 @@ async def _sync(settings, state, guard, notifier, make_llm, client, force, today
             report.move_failures += 1
 
     # 6. Remember what we've seen, so a quiet hour costs two page lookups and nothing else.
-    #    If a line was missed once (not parked yet), don't: the next sync retries it.
-    retry = len(report.missed) > len(report.parked)
+    #    If a line was missed once (not parked yet), or a note is still being written,
+    #    don't: the next sync reads the Inbox again.
+    retry = len(report.missed) > len(report.parked) or inbox.held > 0
     if not retry:
         inbox_page = await run(client.pages.retrieve, page_id=ws.inbox_id)
         board_page = await run(client.pages.retrieve, page_id=ws.board_id)

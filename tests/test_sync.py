@@ -1,6 +1,6 @@
 import re
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
@@ -106,8 +106,7 @@ async def sync(env, **kw):
             env.notifier,
             env.make_llm,
             client=env.fake,
-            today=NOW,
-            **kw,
+            **{"today": NOW, **kw},
         )
     finally:
         notion.root_page_id = original
@@ -138,6 +137,44 @@ async def test_notes_are_sorted_onto_the_board_and_tidied_away(env):
         "renew passport",
         "change bedsheets",
         "call 3 to change plan",
+    ]
+
+
+def set_text(env, block_id, text, at):
+    """The phone app saving more of a note: new text and a new edit time (to the minute)."""
+    block = env.fake.objects[block_id]
+    block["paragraph"]["rich_text"] = [
+        {"type": "text", "text": {"content": text}, "plain_text": text}
+    ]
+    block["last_edited_time"] = at.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:00.000Z")
+    env.fake.touch(env.ws.inbox_id)
+
+
+async def test_a_note_still_being_typed_is_left_alone_until_it_settles(env):
+    # The phone has saved only the first part of a note when the hourly sync runs.
+    urgent = env.fake.add_text(env.ws.inbox_id, "paragraph", "Urgent:")
+    rest = env.fake.add_text(env.ws.inbox_id, "paragraph", "call the")
+    set_text(env, urgent, "Urgent:", NOW - timedelta(minutes=10))
+    set_text(env, rest, "call the", NOW - timedelta(minutes=2))
+    env.fake.add_text(env.ws.inbox_id, "paragraph", "")
+    env.fake.add_text(env.ws.inbox_id, "paragraph", "buy milk")  # an older, finished note
+
+    report = await sync(env)
+    assert report.held == 2 and report.sorted_lines == 1
+    assert "wait for the next sync" in report.summary()
+    assert board_tasks(env) == ["[ ] buy milk"]
+    assert not env.fake.objects[urgent]["archived"] and not env.fake.objects[rest]["archived"]
+    assert env.fake.texts(env.ws.processed_id) == ["buy milk"]
+
+    # The rest of the note arrives, then nobody touches it for 15 minutes.
+    set_text(env, rest, "call the bank about the card", NOW + timedelta(minutes=5))
+    report = await sync(env, today=NOW + timedelta(minutes=21))
+    assert report.held == 0 and report.sorted_lines == 2
+    assert "[ ] call the bank about the card" in board_tasks(env)
+    assert env.fake.texts(env.ws.processed_id) == [
+        "Urgent:",
+        "call the bank about the card",
+        "buy milk",
     ]
 
 

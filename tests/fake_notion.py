@@ -84,7 +84,13 @@ class FakeNotion:
         body = dict(block.get(block["type"], {}))
         nested = body.pop("children", [])
         block[block["type"]] = body
-        self.objects[block_id] = {"object": "block", "id": block_id, "archived": False, **block}
+        self.objects[block_id] = {
+            "object": "block",
+            "id": block_id,
+            "archived": False,
+            "last_edited_time": "2026-10-20T09:00:00.000Z",
+            **block,
+        }
         self.children[block_id] = []
         siblings = self.children[parent]
         if at_start:

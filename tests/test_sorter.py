@@ -121,6 +121,15 @@ def test_nested_lines_stay_under_their_number():
     assert number_jottings(jots("mum bday\n  - get gift")) == "[1] mum bday\n       - get gift"
 
 
+def test_a_blank_line_separates_inbox_notes():
+    lines = [
+        Jotting("b1", "Urgent:", note=1),
+        Jotting("b2", "call the bank", note=1),
+        Jotting("b3", "buy milk", note=2),
+    ]
+    assert number_jottings(lines) == "[1] Urgent:\n[2] call the bank\n\n[3] buy milk"
+
+
 async def test_lines_under_a_board_heading_stay_in_that_group(guard):
     lines = [
         Jotting("b1", "pricing for him", heading="Robin", group="project:Robin"),

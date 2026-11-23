@@ -145,6 +145,10 @@ How the notes are written:
 it belong to that section until the next label. A label only names its section: every line \
 under it is still an item (e.g. "REMEMBER:" followed by "2,000 Calories/day" means a habit, \
 not a label). Indented lines belong to the line above.
+- A blank line separates notes written at different times. Lines in the same note were \
+written together: read each line in the light of its note (e.g. "Urgent:" makes the lines \
+after it urgent), but a label never reaches past its own note. Each line can still be its \
+own item.
 - A line starting `(typed on the Board…)` was typed straight onto the owner's Board. \
 `under "X"` is the heading it sits under: it belongs to that project, person or area, and \
 "him"/"her"/"them" in it means X, unless the line clearly has nothing to do with X (the \
@@ -233,9 +237,12 @@ class SortOutcome:
 
 
 def number_jottings(jottings: list[Jotting]) -> str:
-    """Render jottings as numbered lines; nested lines stay under their number."""
+    """Render jottings as numbered lines; nested lines stay under their number. A blank
+    line separates Inbox notes, so lines written together stay visibly together."""
     lines = []
     for n, j in enumerate(jottings, 1):
+        if n > 1 and j.note is not None and j.note != jottings[n - 2].note:
+            lines.append("")
         text = j.text.replace("</notes>", "< /notes>")  # can't close the data block early
         if j.on_board:
             where = [f'under "{j.heading}"'] if j.heading else []
