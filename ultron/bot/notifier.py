@@ -5,11 +5,13 @@ import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
-from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardRemove
+from telegram.error import TelegramError
 
 from ultron.bot.routing import destination_for
 from ultron.config import Settings
 from ultron.notify import Space
+from ultron.ops import activity
 from ultron.state import State
 
 log = logging.getLogger(__name__)
@@ -114,6 +116,15 @@ def close_ask(state: State, chat_id: int, thread_id: int | None, topic: str | No
         state.set(KEY_OPEN, json.dumps(opened))
 
 
+def close_all_asks(state: State) -> None:
+    """Forget every open question (on bot start). Swipe-replies to old questions still
+    route through `record_ask`'s list."""
+    state.set(KEY_OPEN, "{}")
+
+
+CLEAR_TEXT = "↻"  # the silent message that clears the reply box, deleted at once
+
+
 class TelegramNotifier:
     def __init__(self, bot: Bot, settings: Settings, state: State | None = None) -> None:
         self.bot = bot
@@ -134,6 +145,29 @@ class TelegramNotifier:
                 reply_markup=reply_markup if n == len(pieces) - 1 else None,
             )
         return message
+
+    async def fresh_start(self) -> None:
+        """On bot start: forget open questions and clear any "Replying to…" box or old
+        keyboard left in Telegram, in each place Ultron posts. A silent message carrying
+        ReplyKeyboardRemove does that; it is deleted straight away. Never raises."""
+        if self.state is not None:
+            close_all_asks(self.state)
+        places = {destination_for(space, self.settings) for space in Space}
+        cleared = 0
+        for dest in places:
+            try:
+                message = await self.bot.send_message(
+                    chat_id=dest.chat_id,
+                    text=CLEAR_TEXT,
+                    message_thread_id=dest.thread_id,
+                    reply_markup=ReplyKeyboardRemove(),
+                    disable_notification=True,
+                )
+                await self.bot.delete_message(dest.chat_id, message.message_id)
+                cleared += 1
+            except TelegramError:
+                log.warning("Couldn't clear the reply box in %s", dest, exc_info=True)
+        activity.record("system", f"cleared reply box ({cleared} of {len(places)} places)")
 
     async def send(self, text: str, space: Space = Space.BRIEFS) -> None:
         await self._send(text, space)

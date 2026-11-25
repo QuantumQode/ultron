@@ -6,10 +6,21 @@ from zoneinfo import ZoneInfo
 
 import pytest
 from conftest import OWNER, make_settings
+from telegram import ReplyKeyboardRemove
+from telegram.error import NetworkError
 
 from ultron.bot import handlers
 from ultron.bot.handlers import Deps, on_error, sync_command
-from ultron.bot.notifier import EMPTY, TELEGRAM_LIMIT, TelegramNotifier, split_message
+from ultron.bot.notifier import (
+    EMPTY,
+    TELEGRAM_LIMIT,
+    TelegramNotifier,
+    open_ask,
+    open_question,
+    record_ask,
+    split_message,
+    topic_for,
+)
 from ultron.notify import Space
 from ultron.ops.status import health_lines
 from ultron.state import State
@@ -88,10 +99,66 @@ async def test_long_question_is_recorded_on_its_last_part():
     bot = FakeBot()
     notifier = TelegramNotifier(bot, make_settings(), state)
     await notifier.ask("word " * 2000, "plan_edit")
-    from ultron.bot.notifier import topic_for
-
     last = len(bot.sent)
     assert topic_for(state, OWNER, last) == "plan_edit"
+    state.close()
+
+
+# --- a clean slate on every bot start ---
+
+
+class ClearingBot(FakeBot):
+    def __init__(self, fail: bool = False):
+        super().__init__()
+        self.deleted = []
+        self.fail = fail
+
+    async def send_message(self, **kwargs):
+        if self.fail:
+            raise NetworkError("down")
+        return await super().send_message(**kwargs)
+
+    async def delete_message(self, chat_id, message_id):
+        self.deleted.append((chat_id, message_id))
+
+
+async def test_bot_start_forgets_the_open_question_and_clears_the_dm_box():
+    state = State(":memory:")
+    open_ask(state, OWNER, None, 55, "nightly", "Your priorities for tomorrow?")
+    record_ask(state, OWNER, 55, "nightly")
+    bot = ClearingBot()
+    await TelegramNotifier(bot, make_settings(), state).fresh_start()
+    assert open_question(state, OWNER, None) is None
+    assert topic_for(state, OWNER, 55) == "nightly"  # a swipe-reply still finds it
+    assert len(bot.sent) == 1  # DM only: one place
+    sent = bot.sent[0]
+    assert isinstance(sent["reply_markup"], ReplyKeyboardRemove)
+    assert sent["disable_notification"] is True
+    assert bot.deleted == [(OWNER, 1)]  # gone straight away
+    state.close()
+
+
+async def test_bot_start_clears_each_group_topic_once(group_settings):
+    bot = ClearingBot()
+    await TelegramNotifier(bot, group_settings, State(":memory:")).fresh_start()
+    places = {(m["chat_id"], m["message_thread_id"]) for m in bot.sent}
+    assert len(places) == len(bot.sent) == len(bot.deleted) == 3
+
+
+async def test_a_question_asked_after_the_clear_stays_open():
+    state = State(":memory:")
+    notifier = TelegramNotifier(ClearingBot(), make_settings(), state)
+    await notifier.fresh_start()
+    await notifier.ask("Your priorities for tomorrow?", "nightly")
+    assert open_question(state, OWNER, None).topic == "nightly"
+    state.close()
+
+
+async def test_a_failed_clear_never_stops_the_bot_starting():
+    state = State(":memory:")
+    open_ask(state, OWNER, None, 55, "nightly", "Your priorities for tomorrow?")
+    await TelegramNotifier(ClearingBot(fail=True), make_settings(), state).fresh_start()
+    assert open_question(state, OWNER, None) is None  # still forgotten
     state.close()
 
 

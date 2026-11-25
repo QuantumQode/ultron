@@ -109,6 +109,14 @@ async def on_startup(
         await review.start(state, notifier, now)
 
 
+async def start(
+    settings: Settings, state: State, notifier: TelegramNotifier, guard: CostGuard, make_llm
+) -> None:
+    """Clear what a restart could leave behind, before anything new is asked."""
+    await notifier.fresh_start()
+    await on_startup(settings, state, notifier, guard, make_llm)
+
+
 def main() -> None:
     setup_logging()
     try:
@@ -130,7 +138,7 @@ def main() -> None:
                 get_updates_request=HTTPXRequest(connection_pool_size=1),
             )
         )
-        .post_init(lambda app: on_startup(settings, state, notifier, guard, make_llm))
+        .post_init(lambda app: start(settings, state, notifier, guard, make_llm))
         .build()
     )
     notifier = TelegramNotifier(app.bot, settings, state)
