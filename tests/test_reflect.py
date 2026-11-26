@@ -124,11 +124,9 @@ async def test_each_session_starts_fresh(env):
     llm = FakeLLM(sonnet("What's behind that?"), sonnet("And then?"))
     await ask(env, llm, "feeling stuck", first.id)
     await ask(env, llm, "work, mostly", first.id)
-    assert [m["content"] for m in llm.requests[1]["messages"]] == [
-        "feeling stuck",
-        "What's behind that?",
-        "work, mostly",
-    ]
+    sent = [m["content"] for m in llm.requests[1]["messages"]]
+    assert sent[0].startswith("[") and sent[0].endswith("] feeling stuck")  # stamped: past
+    assert sent[1:] == ["What's behind that?", "work, mostly"]
     assert "Portugal" not in llm.requests[0]["system"][1]["text"]  # no old running summary
 
     reflect.finish(env.state, NOW)

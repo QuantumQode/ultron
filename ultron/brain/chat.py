@@ -15,6 +15,7 @@ from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from ultron.brain import prompts
 from ultron.brain.tools import (
@@ -61,6 +62,12 @@ class ChatReply:
 # --- history ---
 
 
+def stamp(ts: str, text: str, zone: ZoneInfo) -> str:
+    """Prefix an owner message with when it was sent, so "today" in an old message isn't
+    read as today."""
+    return f"[{datetime.fromisoformat(ts).astimezone(zone):%a %d %b, %H:%M}] {text}"
+
+
 class History:
     def __init__(self, state: State) -> None:
         self.state = state
@@ -73,20 +80,33 @@ class History:
         )
 
     def recent(
-        self, space: str, limit: int = HISTORY, session_id: int | None = None
+        self,
+        space: str,
+        limit: int = HISTORY,
+        session_id: int | None = None,
+        zone: ZoneInfo | None = None,
     ) -> list[dict[str, str]]:
+        """`zone`: stamp the owner's messages with when they were sent (for Claude)."""
         if session_id is None:
             rows = self.db.execute(
-                "SELECT role, text FROM chat_messages WHERE space = ? ORDER BY id DESC LIMIT ?",
+                "SELECT ts, role, text FROM chat_messages WHERE space = ? ORDER BY id DESC LIMIT ?",
                 (space, limit),
             ).fetchall()
         else:
             rows = self.db.execute(
-                "SELECT role, text FROM chat_messages WHERE session_id = ? "
+                "SELECT ts, role, text FROM chat_messages WHERE session_id = ? "
                 "ORDER BY id DESC LIMIT ?",
                 (session_id, limit),
             ).fetchall()
-        messages = [{"role": r["role"], "content": r["text"]} for r in reversed(rows)]
+        messages = [
+            {
+                "role": r["role"],
+                "content": stamp(r["ts"], r["text"], zone)
+                if zone and r["role"] == "user"
+                else r["text"],
+            }
+            for r in reversed(rows)
+        ]
         while messages and messages[0]["role"] != "user":
             messages.pop(0)  # the API needs the conversation to start with the owner
         return messages
@@ -94,18 +114,21 @@ class History:
     def summary(self, space: str) -> str:
         return self.state.get(f"chat.summary.{space}", "") or ""
 
-    def to_fold(self, space: str) -> list[tuple[int, str, str]]:
+    def to_fold(self, space: str, zone: ZoneInfo | None = None) -> list[tuple[int, str, str]]:
         count = self.db.execute(
             "SELECT COUNT(*) FROM chat_messages WHERE space = ? AND session_id IS NULL", (space,)
         ).fetchone()[0]
         if count < FOLD_AT:
             return []
         rows = self.db.execute(
-            "SELECT id, role, text FROM chat_messages WHERE space = ? AND session_id IS NULL "
+            "SELECT id, ts, role, text FROM chat_messages WHERE space = ? AND session_id IS NULL "
             "ORDER BY id LIMIT ?",
             (space, count - HISTORY),
         ).fetchall()
-        return [(r["id"], r["role"], r["text"]) for r in rows]
+        return [
+            (r["id"], r["role"], stamp(r["ts"], r["text"], zone) if zone else r["text"])
+            for r in rows
+        ]
 
     def fold(self, space: str, ids: list[int], summary: str) -> None:
         self.state.set(f"chat.summary.{space}", summary)
@@ -423,7 +446,11 @@ async def chat(
             ),
         },
     ]
-    past = history.recent(key, SESSION_HISTORY, session_id) if session_id else history.recent(key)
+    past = (
+        history.recent(key, SESSION_HISTORY, session_id, zone=settings.zone)
+        if session_id
+        else history.recent(key, zone=settings.zone)
+    )
     messages = past + [{"role": "user", "content": text}]
     effects = ToolEffects()
     purpose = "reflect" if reflect_on else "chat"
@@ -506,7 +533,7 @@ async def chat(
         history.add(key, "user", text, session_id)
         history.add(key, "assistant", answer, session_id)
         if session_id is None:
-            await _fold_history(llm, guard, history, key, settings.model_fast)
+            await _fold_history(llm, guard, history, key, settings.model_fast, settings.zone)
 
     return ChatReply(
         text=answer,
@@ -520,10 +547,10 @@ async def chat(
 
 
 async def _fold_history(
-    llm: Any, guard: CostGuard, history: History, space: str, model: str
+    llm: Any, guard: CostGuard, history: History, space: str, model: str, zone: ZoneInfo
 ) -> None:
     """Fold old messages into the running summary (one cheap call every ~10 messages)."""
-    old = history.to_fold(space)
+    old = history.to_fold(space, zone)
     if not old:
         return
     transcript = "\n".join(f"{role}: {text}" for _, role, text in old)

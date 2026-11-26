@@ -263,6 +263,58 @@ async def test_history_is_folded_into_a_summary(env, monkeypatch):
     assert "Owner asked two old questions." in llm2.requests[0]["system"][1]["text"]
 
 
+def add_at(state, ts, role, text_, space="chat"):
+    state.db.execute(
+        "INSERT INTO chat_messages (ts, space, role, text) VALUES (?, ?, ?, ?)",
+        (ts, space, role, text_),
+    )
+
+
+async def test_past_owner_messages_reach_claude_with_when_they_were_sent(env):
+    # Days ago the owner said "today is Sunday 22nd"; it must not read as today now.
+    add_at(env.state, "2026-11-22T20:41:00+00:00", "user", "today is sunday 22nd")
+    add_at(env.state, "2026-11-22T20:41:30+00:00", "assistant", "Thanks, today is Sun 22 Nov.")
+    llm = FakeLLM(response(text("ok")))
+
+    @asynccontextmanager
+    async def make_llm():
+        yield llm
+
+    now = datetime(2026, 11, 26, 17, 55, tzinfo=LONDON)
+    await chat(env.settings, env.state, env.guard, make_llm, "padel tomorrow", Space.CHAT, now=now)
+    request = llm.requests[0]
+    assert [m["content"] for m in request["messages"]] == [
+        "[Sun 22 Nov, 20:41] today is sunday 22nd",
+        "Thanks, today is Sun 22 Nov.",  # Ultron's replies stay unstamped
+        "padel tomorrow",  # the new message is now; the context's Now line says when
+    ]
+    assert "Thursday 26 November 2026, 17:55" in request["system"][1]["text"]
+    assert '"Now" line in the context is the real date' in request["system"][0]["text"]
+    # stored and shown as typed
+    assert History(env.state).recent("chat")[0]["content"] == "today is sunday 22nd"
+
+
+def test_stamps_use_the_owners_timezone(env):
+    add_at(env.state, "2026-07-01T23:30:00+00:00", "user", "late one")
+    assert History(env.state).recent("chat", zone=LONDON)[0]["content"] == (
+        "[Thu 02 Jul, 00:30] late one"  # BST: already the next day in London
+    )
+
+
+async def test_folded_lines_carry_their_dates(env, monkeypatch):
+    monkeypatch.setattr(chat_module, "FOLD_AT", 6)
+    monkeypatch.setattr(chat_module, "HISTORY", 2)
+    for n in range(2):
+        add_at(env.state, f"2026-10-1{n}T09:00:00+00:00", "user", f"old question {n}")
+        add_at(env.state, f"2026-10-1{n}T09:01:00+00:00", "assistant", f"old answer {n}")
+    llm = FakeLLM(response(text("Answer.")), response(text("Summary.")))
+    await ask(env, llm, "new question")
+    transcript = llm.requests[1]["messages"][0]["content"]
+    assert "user: [Sat 10 Oct, 10:00] old question 0" in transcript
+    assert "assistant: [Sun 11 Oct, 10:01] old answer 1" in transcript
+    assert 'never "today"' in llm.requests[1]["system"]
+
+
 def test_history_always_starts_with_the_owner(env):
     history = History(env.state)
     history.add("chat", "assistant", "orphan reply")
